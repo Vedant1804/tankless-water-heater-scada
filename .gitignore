@@ -1,0 +1,42 @@
+# Virtual Environment
+.venv/
+env/
+venv/
+ENV/
+
+# Python cache & bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Streamlit local secrets & configuration
+.streamlit/secrets.toml
+
+# Environment & Credentials
+.env
+*.env
+*.pem
+*.key
+*.cert
+
+# IDE and Editor configuration
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Process Telemetry Logs & Temporary files
+logs/*.csv
+!logs/.gitkeep
+*.log
+*.tmp
+*.bak
+
+# Windows / OS files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
