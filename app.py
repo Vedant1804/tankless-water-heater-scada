@@ -4,7 +4,8 @@ TANKLESS GAS WATER HEATER / HEAT CELL PROCESS SCADA MONITORING SYSTEM
 Industrial Process Supervisory Control and Data Acquisition (SCADA / HMI)
 ================================================================================
 Academic digital twin interface for real-time telemetry monitoring,
-supporting dynamic simulation (DEMO MODE) and UDP hardware telemetry (LIVE MODE).
+supporting local Wi-Fi UDP hardware reception (LIVE MODE) from ESP32
+and first-principles dynamic thermal simulation (DEMO MODE).
 """
 
 from datetime import datetime
@@ -35,27 +36,43 @@ st.set_page_config(
 inject_custom_css()
 
 # ==============================================================================
+# GLOBAL BACKGROUND UDP THREAD (NON-BLOCKING SINGLETON)
+# ==============================================================================
+@st.cache_resource
+def get_global_udp_receiver(port: int = config.DEFAULT_UDP_PORT) -> UDPDataReceiver:
+    """
+    Maintains a single background daemon thread listening on 0.0.0.0:5005.
+    Thread-safe, non-blocking, and survives Streamlit script reruns.
+    """
+    receiver = UDPDataReceiver(host=config.DEFAULT_UDP_HOST, port=port)
+    receiver.start()
+    return receiver
+
+
+# ==============================================================================
 # SESSION STATE INITIALIZATION (PERSISTENT ACROSS RUNS)
 # ==============================================================================
 if "initialized" not in st.session_state:
     st.session_state.initialized = True
-    st.session_state.mode = "DEMO"
+    st.session_state.mode = "LIVE"       # Default to LIVE mode for hardware telemetry
     st.session_state.is_monitoring = True
     st.session_state.udp_port = config.DEFAULT_UDP_PORT
     st.session_state.window_seconds = config.DEFAULT_TIME_WINDOW
 
-    # Persistent singletons
-    st.session_state.udp_receiver = UDPDataReceiver(port=config.DEFAULT_UDP_PORT)
     st.session_state.simulator = WaterHeaterDemoSimulator()
     st.session_state.logger = ProcessDataLogger()
     st.session_state.history_records = []
     st.session_state.last_valid_data = None
     st.session_state.last_update_ts = None
 
-# Ensure UDP receiver runs if Live mode is chosen
-udp_receiver: UDPDataReceiver = st.session_state.udp_receiver
+# Singletons
+udp_receiver: UDPDataReceiver = get_global_udp_receiver(st.session_state.udp_port)
 simulator: WaterHeaterDemoSimulator = st.session_state.simulator
 logger_instance: ProcessDataLogger = st.session_state.logger
+
+# Ensure UDP socket is running
+if not udp_receiver.is_running:
+    udp_receiver.start()
 
 # ==============================================================================
 # SIDEBAR CONTROLS
@@ -73,16 +90,13 @@ if controls["mode"] != st.session_state.mode:
     st.session_state.mode = controls["mode"]
     if st.session_state.mode == "LIVE":
         if not udp_receiver.is_running:
-            success, msg = udp_receiver.start()
-            if not success:
-                st.sidebar.error(msg)
+            udp_receiver.start()
     st.rerun()
 
 # Handle UDP port reconfiguration
 if controls["udp_port"] != st.session_state.udp_port:
     st.session_state.udp_port = controls["udp_port"]
-    if udp_receiver.is_running:
-        udp_receiver.restart(st.session_state.udp_port)
+    udp_receiver.restart(st.session_state.udp_port)
 
 st.session_state.window_seconds = controls["window_seconds"]
 
@@ -92,10 +106,6 @@ if controls["clear_history"]:
     st.session_state.last_valid_data = None
     st.session_state.last_update_ts = None
     st.rerun()
-
-# Ensure receiver is active when in LIVE mode
-if st.session_state.mode == "LIVE" and not udp_receiver.is_running:
-    udp_receiver.start()
 
 # ==============================================================================
 # REAL-TIME MONITORING FRAGMENT (SMOOTH NON-FLICKERING PARTIAL REFRESH)
@@ -118,11 +128,13 @@ def render_scada_live_view():
     if mode == "DEMO":
         comm_stats = {
             "status": "CONNECTED",
+            "status_label": "Demo Active",
             "is_running": True,
             "port": st.session_state.udp_port,
             "packet_count": len(st.session_state.history_records),
             "sample_rate_hz": round(1.0 / controls["refresh_rate"], 1),
-            "sender": "INTERNAL DIGITAL MODEL"
+            "sender": "INTERNAL DIGITAL MODEL",
+            "last_packet_time_str": datetime.now().strftime("%H:%M:%S")
         }
 
         if is_monitoring:
@@ -132,7 +144,7 @@ def render_scada_live_view():
         else:
             latest_data = st.session_state.last_valid_data
 
-    else:  # LIVE MODE
+    else:  # LIVE MODE (ACTUAL UDP PACKETS FROM ESP32)
         raw_live_data, comm_stats = udp_receiver.get_latest()
 
         if raw_live_data:
@@ -140,7 +152,7 @@ def render_scada_live_view():
             st.session_state.last_valid_data = latest_data
             st.session_state.last_update_ts = latest_data["timestamp"]
         else:
-            # When awaiting packets or disconnected, do not fake live data!
+            # If no packet received yet, do NOT invent fake data
             latest_data = st.session_state.last_valid_data
 
     # Append to rolling history and file logger if monitoring active & data exists
@@ -182,7 +194,7 @@ def render_scada_live_view():
             alarm_state=overall_status
         )
 
-    # 1. TOP SCADA HEADER
+    # 1. TOP SCADA HEADER (Live connection status & timestamp)
     render_header(
         system_status=overall_status,
         mode=mode,
@@ -190,17 +202,21 @@ def render_scada_live_view():
         last_timestamp=st.session_state.last_update_ts
     )
 
-    # 2. TOP KPI CARDS
+    # 2. TOP KPI CARDS (4 Process Variables)
     render_kpi_cards(
         latest_data=latest_data,
         history_df=history_df,
-        thresholds=thresholds
+        thresholds=thresholds,
+        mode=mode
     )
 
     st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
 
     # 3. INDUSTRIAL PROCESS SCHEMATIC OVERVIEW
-    render_process_overview(data=latest_data)
+    render_process_overview(
+        data=latest_data,
+        mode=mode
+    )
 
     st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
 
@@ -208,7 +224,8 @@ def render_scada_live_view():
     render_live_charts(
         history_df=history_df,
         window_seconds=st.session_state.window_seconds,
-        thresholds=thresholds
+        thresholds=thresholds,
+        mode=mode
     )
 
     st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)

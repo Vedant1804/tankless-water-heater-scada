@@ -3,57 +3,98 @@ Industrial Process Overview Component.
 Renders an interactive, vector-accurate SCADA Process Flow Schematic (PFD)
 representing the exact physical layout of the Simulink digital model:
 Water Flow -> Flow Switch -> Burner / Ignition -> Heat Cell -> Pipe -> Outlet Temp Sensor.
+Supports waiting states in LIVE mode when awaiting ESP32 packets.
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import streamlit as st
 import config
 from utils.helpers import format_value, clean_html
 
 
-def render_process_overview(data: Dict[str, Any]):
+def render_process_overview(data: Optional[Dict[str, Any]], mode: str = "DEMO"):
     """
     Render vector-based industrial schematic with dynamic live readings and component states.
+    In LIVE mode without packets, displays clean waiting indicators rather than fake data.
     """
-    t_out = data.get("outlet_temp", 48.08) if data else 48.08
-    flow = data.get("flow_rate", 5.00) if data else 5.00
-    power = data.get("burner_power", 13.20) if data else 13.20
-    t_cell = data.get("heat_cell_temp", 48.10) if data else 48.10
+    has_data = data is not None
 
-    # Flow switch status
-    flow_active = flow >= config.FLOW_SWITCH_TRIP
-    fs_color = config.COLOR_NORMAL if flow_active else "#64748b"
-    fs_label = "CLOSED (FLOW OK)" if flow_active else "OPEN (NO FLOW)"
-    fs_stroke = "#10b981" if flow_active else "#475569"
+    if has_data:
+        t_out = data.get("outlet_temp")
+        flow = data.get("flow_rate", 0.0)
+        power = data.get("burner_power", 0.0)
+        t_cell = data.get("heat_cell_temp")
 
-    # Burner status
-    burner_active = power > 0.1
-    flame_display = "block" if burner_active else "none"
-    burner_border = "#f97316" if burner_active else "#334155"
-    burner_label = "FIRING ACTIVE" if burner_active else "OFF (STANDBY)"
-    burner_status_color = "#f97316" if burner_active else "#64748b"
+        # Flow switch status
+        flow_active = flow >= config.FLOW_SWITCH_TRIP
+        fs_color = config.COLOR_NORMAL if flow_active else "#64748b"
+        fs_label = "CLOSED (FLOW OK)" if flow_active else "OPEN (NO FLOW)"
+        fs_stroke = "#10b981" if flow_active else "#475569"
 
-    # Heat cell color mapping (cold 20°C -> deep warm 75°C)
-    norm_temp = max(0.0, min(1.0, (t_cell - 20.0) / 60.0))
-    cell_glow = f"rgba({int(30 + norm_temp * 210)}, {int(58 + (1 - norm_temp) * 60)}, {int(138 - norm_temp * 100)}, 0.45)"
+        # Burner status
+        burner_active = power > 0.1
+        flame_display = "block" if burner_active else "none"
+        burner_border = "#f97316" if burner_active else "#334155"
+        burner_label = "FIRING ACTIVE" if burner_active else "OFF (STANDBY)"
+        burner_status_color = "#f97316" if burner_active else "#64748b"
 
-    # Outlet temp status color
-    if t_out >= config.DEFAULT_OUTLET_HIGH_ALARM:
-        t_out_color = config.COLOR_ALARM
-    elif t_out >= config.DEFAULT_OUTLET_HIGH_WARN:
-        t_out_color = config.COLOR_WARNING
+        # Heat cell color mapping
+        norm_temp = max(0.0, min(1.0, ((t_cell or 20.0) - 20.0) / 60.0))
+        cell_glow = f"rgba({int(30 + norm_temp * 210)}, {int(58 + (1 - norm_temp) * 60)}, {int(138 - norm_temp * 100)}, 0.45)"
+
+        # Outlet temp status color
+        if t_out is not None and t_out >= config.DEFAULT_OUTLET_HIGH_ALARM:
+            t_out_color = config.COLOR_ALARM
+        elif t_out is not None and t_out >= config.DEFAULT_OUTLET_HIGH_WARN:
+            t_out_color = config.COLOR_WARNING
+        else:
+            t_out_color = config.COLOR_OUTLET_TEMP
+
+        anim_duration = "1.5s" if flow > 4.0 else ("2.8s" if flow > 1.0 else "0s")
+        anim_opacity = "1" if flow > 0.1 else "0"
+
+        flow_str = f"{format_value(flow, 2)} L/min"
+        power_str = f"{format_value(power, 2)} kW"
+        cell_str = f"{format_value(t_cell, 2)} °C"
+        outlet_str = f"{format_value(t_out, 2)} °C"
+        status_tag = "SIMULINK DIGITAL MODEL" if mode == "DEMO" else "LIVE ESP32 TELEMETRY"
+        tag_color = "#38bdf8" if mode == "DEMO" else "#34d399"
+
     else:
-        t_out_color = config.COLOR_OUTLET_TEMP
+        # WAITING STATE (Live mode before UDP packet arrival)
+        t_out = None
+        flow = 0.0
+        power = 0.0
+        t_cell = None
 
-    # Dynamic flow animation speed
-    anim_duration = "1.5s" if flow > 4.0 else ("2.8s" if flow > 1.0 else "0s")
-    anim_opacity = "1" if flow > 0.1 else "0"
+        flow_active = False
+        fs_color = "#f59e0b"
+        fs_label = "AWAITING ESP32"
+        fs_stroke = "#475569"
+
+        burner_active = False
+        flame_display = "none"
+        burner_border = "#334155"
+        burner_label = "STANDBY / AWAITING DATA"
+        burner_status_color = "#64748b"
+        cell_glow = "rgba(30, 41, 59, 0.4)"
+        t_out_color = "#64748b"
+
+        anim_duration = "0s"
+        anim_opacity = "0"
+
+        flow_str = "-- L/min"
+        power_str = "-- kW"
+        cell_str = "-- °C"
+        outlet_str = "-- °C"
+        status_tag = "WAITING FOR ESP32 (UDP: 5005)"
+        tag_color = "#fbbf24"
 
     svg_schematic = f"""
 <div class="scada-panel">
 <div class="scada-panel-title">
 <span>🏭 DIGITAL PROCESS SCHEMATIC • HEAT CELL & SENSING TRAIN</span>
-<span style="font-family: {config.FONT_MONO}; font-size: 0.72rem; color: #64748b; margin-left: auto;">SIMULINK MODEL TOPOLOGY</span>
+<span style="font-family: {config.FONT_MONO}; font-size: 0.72rem; color: {tag_color}; margin-left: auto;">{status_tag}</span>
 </div>
 <div class="pfd-container">
 <svg viewBox="0 0 1000 320" width="100%" height="100%" style="overflow: visible;" xmlns="http://www.w3.org/2000/svg">
@@ -105,7 +146,7 @@ def render_process_overview(data: Dict[str, Any]):
 <line x1="65" y1="55" x2="{65 if flow_active else 78}" y2="{40 if flow_active else 44}" stroke="{fs_color}" stroke-width="3" stroke-linecap="round" />
 <circle cx="65" cy="55" r="3" fill="#ffffff" />
 <text x="65" y="86" fill="{fs_color}" font-size="9" font-family="{config.FONT_SANS}" font-weight="700" text-anchor="middle">{fs_label}</text>
-<text x="65" y="102" fill="#00e5ff" font-size="12" font-family="{config.FONT_MONO}" font-weight="700" text-anchor="middle">{format_value(flow, 2)} L/min</text>
+<text x="65" y="102" fill="#00e5ff" font-size="12" font-family="{config.FONT_MONO}" font-weight="700" text-anchor="middle">{flow_str}</text>
 </g>
 <path d="M 350 160 L 440 160" stroke="#1e293b" stroke-width="26" fill="none" />
 <path d="M 350 160 L 440 160" stroke="#0284c7" stroke-width="14" fill="none" />
@@ -120,7 +161,7 @@ def render_process_overview(data: Dict[str, Any]):
 </g>
 <rect x="25" y="122" width="130" height="28" rx="4" fill="#0b0f19" stroke="#334155" />
 <text x="90" y="134" fill="#94a3b8" font-size="8" font-family="{config.FONT_SANS}" font-weight="600" text-anchor="middle">CELL CORE TEMP</text>
-<text x="90" y="146" fill="#a855f7" font-size="12" font-family="{config.FONT_MONO}" font-weight="700" text-anchor="middle">{format_value(t_cell, 2)} °C</text>
+<text x="90" y="146" fill="#a855f7" font-size="12" font-family="{config.FONT_MONO}" font-weight="700" text-anchor="middle">{cell_str}</text>
 </g>
 <g transform="translate(440, 230)">
 <rect width="180" height="75" rx="6" fill="#0f172a" stroke="{burner_border}" stroke-width="1.5" />
@@ -138,7 +179,7 @@ def render_process_overview(data: Dict[str, Any]):
 </path>
 </g>
 <text x="90" y="38" fill="{burner_status_color}" font-size="9" font-family="{config.FONT_SANS}" font-weight="700" text-anchor="middle">{burner_label}</text>
-<text x="90" y="58" fill="#f97316" font-size="14" font-family="{config.FONT_MONO}" font-weight="700" text-anchor="middle">{format_value(power, 2)} kW</text>
+<text x="90" y="58" fill="#f97316" font-size="14" font-family="{config.FONT_MONO}" font-weight="700" text-anchor="middle">{power_str}</text>
 </g>
 <g stroke="#f97316" stroke-width="2" stroke-dasharray="3 3" opacity="{1.0 if burner_active else 0.2}">
 <line x1="480" y1="230" x2="480" y2="220" />
@@ -166,7 +207,7 @@ def render_process_overview(data: Dict[str, Any]):
 <rect x="61" y="24" width="8" height="42" fill="#94a3b8" rx="2" />
 <circle cx="65" cy="65" r="7" fill="{t_out_color}" />
 <text x="65" y="88" fill="#94a3b8" font-size="9" font-family="{config.FONT_SANS}" font-weight="600" text-anchor="middle">OUTLET FLUID TEMP</text>
-<text x="65" y="112" fill="{t_out_color}" font-size="15" font-family="{config.FONT_MONO}" font-weight="700" text-anchor="middle">{format_value(t_out, 2)} °C</text>
+<text x="65" y="112" fill="{t_out_color}" font-size="15" font-family="{config.FONT_MONO}" font-weight="700" text-anchor="middle">{outlet_str}</text>
 </g>
 <path d="M 890 160 L 970 160" stroke="#1e293b" stroke-width="26" stroke-linecap="round" fill="none" />
 <path d="M 890 160 L 970 160" stroke="#e11d48" stroke-width="14" stroke-linecap="round" fill="none" />

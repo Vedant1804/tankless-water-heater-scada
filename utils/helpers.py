@@ -42,11 +42,11 @@ def evaluate_alarms(
                 "time": datetime.now().strftime("%H:%M:%S"),
                 "tag": "COMM-01",
                 "param": "UDP Telemetry",
-                "value": "NO PACKETS",
+                "value": "CONNECTION LOST",
                 "limit": f"> {config.COMM_TIMEOUT_SEC}s",
                 "severity": "ALARM",
                 "color": config.COLOR_ALARM,
-                "msg": "Communication lost with ESP32 gateway"
+                "msg": "Connection Lost: No packets received from ESP32 gateway within timeout"
             })
         elif comm_status == "STALE":
             active_alarms.append({
@@ -57,18 +57,18 @@ def evaluate_alarms(
                 "limit": f"> {config.COMM_STALE_SEC}s",
                 "severity": "WARNING",
                 "color": config.COLOR_WARNING,
-                "msg": "Telemetry packets arriving with high latency"
+                "msg": "Telemetry packets arriving with high latency (> 1.5s delay)"
             })
-        elif comm_status == "WAITING_FOR_DATA":
+        elif comm_status in ["WAITING_FOR_DATA", "WAITING_FOR_ESP32", "OFFLINE"]:
             active_alarms.append({
                 "time": datetime.now().strftime("%H:%M:%S"),
                 "tag": "COMM-01",
                 "param": "UDP Telemetry",
-                "value": "AWAITING",
-                "limit": "--",
+                "value": "WAITING FOR ESP32",
+                "limit": f"Port {config.DEFAULT_UDP_PORT}",
                 "severity": "OFFLINE",
-                "color": config.COLOR_OFFLINE,
-                "msg": "Listening on UDP socket, awaiting initial datagram"
+                "color": config.COLOR_WARNING,
+                "msg": "Bound to 0.0.0.0:5005 — Waiting for ESP32 datagrams on Wi-Fi"
             })
 
     if not data:
@@ -157,7 +157,7 @@ def evaluate_alarms(
         overall = "ALARM"
     elif has_warn:
         overall = "WARNING"
-    elif comm_status in ["OFFLINE", "WAITING_FOR_DATA"] and mode == "LIVE":
+    elif comm_status in ["OFFLINE", "WAITING_FOR_DATA", "WAITING_FOR_ESP32"] and mode == "LIVE":
         overall = "OFFLINE"
     else:
         overall = "NORMAL"

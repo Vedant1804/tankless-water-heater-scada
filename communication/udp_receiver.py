@@ -7,6 +7,7 @@ validates payload syntax, and updates real-time process state.
 import socket
 import threading
 import time
+from datetime import datetime
 import logging
 from typing import Dict, Any, Optional, Tuple
 from communication.data_parser import parse_process_payload
@@ -41,7 +42,7 @@ class UDPDataReceiver:
         self._recent_timestamps = []
 
     def start(self) -> Tuple[bool, str]:
-        """Start listening on the configured UDP port."""
+        """Start listening on the configured UDP port in a non-blocking background thread."""
         with self.lock:
             if self.is_running and self.thread and self.thread.is_alive():
                 return True, f"Receiver already active on port {self.port}"
@@ -67,7 +68,7 @@ class UDPDataReceiver:
             return True, f"Listening on UDP port {self.port}"
 
     def stop(self):
-        """Stop receiver thread and release socket."""
+        """Stop receiver thread and release socket cleanly."""
         self.is_running = False
         if self.thread and self.thread.is_alive():
             self.thread.join(timeout=1.0)
@@ -86,7 +87,7 @@ class UDPDataReceiver:
         return self.start()
 
     def _listen_loop(self):
-        """Internal daemon loop reading datagrams."""
+        """Internal daemon loop reading datagrams from ESP32."""
         while self.is_running:
             try:
                 if not self.sock:
@@ -103,7 +104,7 @@ class UDPDataReceiver:
                         self.last_sender = sender
                         self.packet_count += 1
 
-                        # Track sample rate
+                        # Track sample rate over sliding window
                         self._recent_timestamps.append(current_time)
                         if len(self._recent_timestamps) > 20:
                             self._recent_timestamps.pop(0)
@@ -123,6 +124,7 @@ class UDPDataReceiver:
     def get_latest(self) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
         """
         Thread-safe retrieval of latest telemetry and connection statistics.
+        Non-blocking: safe to call from Streamlit's main execution thread.
 
         Returns:
             (latest_data_dict_or_None, stats_dict)
@@ -138,29 +140,45 @@ class UDPDataReceiver:
                 if dt_span > 0:
                     hz = round((len(self._recent_timestamps) - 1) / dt_span, 1)
 
-            # Determine connection status
+            # Determine connection status and user-facing labels
             if not self.is_running:
                 status = "OFFLINE"
+                status_label = "Offline"
             elif self.last_packet_time is None:
-                status = "WAITING_FOR_DATA"
+                status = "WAITING_FOR_ESP32"
+                status_label = config.STATUS_WAITING_ESP32
             else:
                 elapsed = now - self.last_packet_time
                 if elapsed < config.COMM_STALE_SEC:
                     status = "CONNECTED"
+                    status_label = config.STATUS_CONNECTED
                 elif elapsed < config.COMM_TIMEOUT_SEC:
                     status = "STALE"
+                    status_label = config.STATUS_STALE
                 else:
                     status = "COMMUNICATION_LOSS"
+                    status_label = config.STATUS_CONNECTION_LOST
+
+            # Formatted last packet timestamp
+            if self.last_packet_time:
+                last_pkt_time_str = datetime.fromtimestamp(self.last_packet_time).strftime("%H:%M:%S")
+                elapsed_sec = round(now - self.last_packet_time, 1)
+            else:
+                last_pkt_time_str = "Waiting for ESP32..."
+                elapsed_sec = None
 
             stats = {
                 "status": status,
+                "status_label": status_label,
                 "is_running": self.is_running,
                 "port": self.port,
+                "host": self.host,
                 "packet_count": self.packet_count,
                 "error_count": self.error_count,
                 "last_error": self.last_error_msg,
                 "last_packet_time": self.last_packet_time,
-                "elapsed_since_packet": round(now - self.last_packet_time, 2) if self.last_packet_time else None,
+                "last_packet_time_str": last_pkt_time_str,
+                "elapsed_since_packet": elapsed_sec,
                 "sender": f"{self.last_sender[0]}:{self.last_sender[1]}" if self.last_sender else None,
                 "sample_rate_hz": hz
             }

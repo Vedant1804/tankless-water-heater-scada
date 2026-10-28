@@ -2,6 +2,7 @@
 Top Industrial KPI Cards Component.
 Renders four high-density, premium SCADA metric cards with live values,
 engineering units, visual range indicators, alarm state badges, and min/max statistics.
+Supports clean waiting states in LIVE mode when awaiting ESP32 packets.
 """
 
 from typing import Dict, Any, List
@@ -14,7 +15,8 @@ from utils.helpers import format_value, clean_html
 def render_kpi_cards(
     latest_data: Dict[str, Any],
     history_df: pd.DataFrame,
-    thresholds: Dict[str, float]
+    thresholds: Dict[str, float],
+    mode: str = "DEMO"
 ):
     """
     Render 4 industrial KPI cards in a 4-column layout.
@@ -47,7 +49,8 @@ def render_kpi_cards(
             warn_high=t_out_warn,
             alarm_high=t_out_alarm,
             history_col="Outlet_Temp" if "Outlet_Temp" in history_df.columns else None,
-            history_df=history_df
+            history_df=history_df,
+            mode=mode
         )
 
     # 2. Flow Rate Card
@@ -62,7 +65,8 @@ def render_kpi_cards(
             accent_color=config.COLOR_FLOW_RATE,
             warn_low=flow_warn,
             history_col="Flow_Rate" if "Flow_Rate" in history_df.columns else None,
-            history_df=history_df
+            history_df=history_df,
+            mode=mode
         )
 
     # 3. Burner Power Card
@@ -77,7 +81,8 @@ def render_kpi_cards(
             accent_color=config.COLOR_BURNER_POWER,
             warn_high=power_warn,
             history_col="Burner_Power" if "Burner_Power" in history_df.columns else None,
-            history_df=history_df
+            history_df=history_df,
+            mode=mode
         )
 
     # 4. Heat Cell Temperature Card
@@ -92,7 +97,8 @@ def render_kpi_cards(
             accent_color=config.COLOR_HEAT_CELL_TEMP,
             warn_high=cell_warn,
             history_col="Heat_Cell_Temp" if "Heat_Cell_Temp" in history_df.columns else None,
-            history_df=history_df
+            history_df=history_df,
+            mode=mode
         )
 
 
@@ -108,7 +114,8 @@ def _render_single_kpi(
     history_df: pd.DataFrame = None,
     warn_high: float = None,
     alarm_high: float = None,
-    warn_low: float = None
+    warn_low: float = None,
+    mode: str = "DEMO"
 ):
     """Generate HTML card for an individual process parameter."""
     min_val, max_val = val_range
@@ -135,11 +142,14 @@ def _render_single_kpi(
 
         # Percentage for visual range bar
         pct = max(0.0, min(100.0, ((num_val - min_val) / (max_val - min_val)) * 100))
+        val_str = format_value(num_val, decimals=2, default="--")
     else:
-        state_badge = '<span style="color: #64748b;">○ NO DATA</span>'
+        if mode == "LIVE":
+            state_badge = '<span style="color: #fbbf24; font-weight: 600;">⏳ WAITING FOR ESP32</span>'
+        else:
+            state_badge = '<span style="color: #64748b;">○ NO DATA</span>'
         pct = 0.0
-
-    val_str = format_value(num_val, decimals=2, default="--")
+        val_str = "--"
 
     # Min/Max in window
     min_str = "--"
@@ -157,7 +167,7 @@ def _render_single_kpi(
             <span class="kpi-tag">{tag}</span>
         </div>
         <div class="kpi-value-container">
-            <span class="kpi-value" style="color: {fill_color};">{val_str}</span>
+            <span class="kpi-value" style="color: {fill_color if num_val is not None else '#64748b'};">{val_str}</span>
             <span class="kpi-unit">{unit}</span>
         </div>
         <div class="kpi-bar-bg">

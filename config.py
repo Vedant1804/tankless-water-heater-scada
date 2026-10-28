@@ -13,13 +13,19 @@ SYSTEM_ID = "SCADA-WH-01"
 VERSION = "2.4.0-IND"
 
 # ==============================================================================
-# COMMUNICATION DEFAULTS
+# COMMUNICATION DEFAULTS (LOCAL UDP WI-FI RECEPTION)
 # ==============================================================================
-DEFAULT_UDP_HOST = "0.0.0.0"       # Listen on all interfaces
+DEFAULT_UDP_HOST = "0.0.0.0"       # Bind to all local interfaces
 DEFAULT_UDP_PORT = 5005          # Default UDP port matching ESP32 firmware
-COMM_TIMEOUT_SEC = 3.0           # Seconds before declaring communication loss
+COMM_TIMEOUT_SEC = 3.0           # Seconds before declaring connection lost
 COMM_STALE_SEC = 1.5             # Seconds before declaring data stale
 DEFAULT_REFRESH_RATE = 1.0       # Dashboard update period in seconds
+
+# Live Connection Status Constants
+STATUS_WAITING_ESP32 = "Waiting for ESP32"
+STATUS_CONNECTED = "Connected / Receiving Data"
+STATUS_CONNECTION_LOST = "Connection Lost"
+STATUS_STALE = "Receiving Data (Delayed/Stale)"
 
 # ==============================================================================
 # PROCESS VARIABLES SPECIFICATION (STRICTLY 4 VARIABLES)

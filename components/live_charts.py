@@ -2,6 +2,7 @@
 Live Real-Time Plotly Charts Component.
 Renders 3 distinct SCADA trend charts with rolling time windows,
 subtle gridlines, industrial dark palettes, threshold limit indicators, and hover tooltips.
+Supports waiting state display when awaiting ESP32 packets.
 """
 
 from typing import Dict, Any
@@ -9,12 +10,14 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 import config
+from utils.helpers import clean_html
 
 
 def render_live_charts(
     history_df: pd.DataFrame,
     window_seconds: int,
-    thresholds: Dict[str, float]
+    thresholds: Dict[str, float],
+    mode: str = "DEMO"
 ):
     """
     Render 3 separate real-time trend charts:
@@ -23,15 +26,24 @@ def render_live_charts(
     3. Burner Power Trend (kW)
     """
     if history_df.empty or len(history_df) < 2:
-        st.markdown(
-            f"""
-            <div style="background: {config.COLOR_BG_CARD}; border: 1px dashed {config.COLOR_BORDER}; border-radius: 8px; padding: 30px; text-align: center; color: #94a3b8;">
-                <span style="font-size: 1.5rem;">📊</span>
-                <p style="margin: 8px 0 0 0; font-size: 0.9rem;">Awaiting telemetry data to plot trends... (Buffer accumulating)</p>
+        if mode == "LIVE":
+            standby_msg = f"""
+            <div style="background: {config.COLOR_BG_CARD}; border: 1px dashed {config.COLOR_BORDER}; border-radius: 8px; padding: 28px; text-align: center; color: #94a3b8;">
+                <span style="font-size: 1.6rem;">📡</span>
+                <p style="margin: 8px 0 4px 0; font-size: 0.95rem; font-weight: 700; color: #cbd5e1;">Waiting for ESP32 UDP Telemetry...</p>
+                <p style="margin: 0; font-size: 0.8rem; color: #64748b;">
+                    Listening on <code>0.0.0.0:5005</code> • Expected CSV payload: <code>outlet_temp,flow_rate,burner_power,heat_cell_temp</code>
+                </p>
             </div>
-            """,
-            unsafe_allow_html=True
-        )
+            """
+        else:
+            standby_msg = f"""
+            <div style="background: {config.COLOR_BG_CARD}; border: 1px dashed {config.COLOR_BORDER}; border-radius: 8px; padding: 28px; text-align: center; color: #94a3b8;">
+                <span style="font-size: 1.6rem;">📊</span>
+                <p style="margin: 8px 0 0 0; font-size: 0.9rem; color: #cbd5e1;">Initializing simulation trend buffer...</p>
+            </div>
+            """
+        st.markdown(clean_html(standby_msg), unsafe_allow_html=True)
         return
 
     # Filter to rolling time window
